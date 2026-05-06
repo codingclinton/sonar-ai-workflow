@@ -1,0 +1,13 @@
+{
+    "type": "module",
+    "private": true,
+    "scripts": {
+        "index": "node indexer/index.js",
+        "search": "node retrieval/search.js"
+    },
+    "dependencies": {
+        "@qdrant/js-client-rest": "^1.17.0",
+        "axios": "^1.16.0",
+        "fast-glob": "^3.3.3"
+    }
+}
