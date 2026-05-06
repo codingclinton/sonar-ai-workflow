@@ -1,0 +1,38 @@
+services:
+  geo2tz:
+    platform: linux/amd64
+  database:
+    platform: linux/amd64
+  web:
+    platform: linux/amd64
+  cocoindex-postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: cocoindex
+      POSTGRES_PASSWORD: cocoindex
+      POSTGRES_DB: cocoindex
+    ports:
+      - "5433:5432"
+    volumes:
+      - cocoindex_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U cocoindex -d cocoindex" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./docker/qdrant:/qdrant/storage
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./docker/ollama:/root/.ollama
+
+volumes:
+  cocoindex_data:
+    driver: local
