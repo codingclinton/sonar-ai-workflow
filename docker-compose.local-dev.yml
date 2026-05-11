@@ -3,6 +3,8 @@ services:
     platform: linux/amd64
   database:
     platform: linux/amd64
+    ports:
+      - "5432:5432"
   web:
     platform: linux/amd64
   cocoindex-postgres:
@@ -25,13 +27,7 @@ services:
     ports:
       - "6333:6333"
     volumes:
-      - ./docker/qdrant:/qdrant/storage
-  ollama:
-    image: ollama/ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ./docker/ollama:/root/.ollama
+      - ./.ai/qdrant:/qdrant/storage
 
 volumes:
   cocoindex_data:
