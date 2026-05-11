@@ -171,7 +171,7 @@ async function main() {
       const isPhp = relPath.endsWith('.php');
       const { className, namespace, layerType } = isPhp
         ? extractPhpMetadata(content, relPath)
-        : { className: null, namespace: null, layerType: 'other' };
+        : { className: null, namespace: null, layerType: relPath.includes('/ui/app/') ? 'frontend' : 'other' };
 
       const needsSummary = isPhp && SUMMARY_LAYERS.has(layerType);
 

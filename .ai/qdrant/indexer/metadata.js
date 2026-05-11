@@ -1,4 +1,5 @@
 export function detectLaravelLayer(relPath) {
+  if (/\/ui\/app\//i.test(relPath)) return 'frontend';
   if (/\/Services\//i.test(relPath)) return 'service';
   if (/\/Controllers\//i.test(relPath)) return 'controller';
   if (/\/Jobs\//i.test(relPath)) return 'job';

@@ -26,6 +26,10 @@ test('detectLaravelLayer other', () => {
   assert.equal(detectLaravelLayer('app/Models/Account.php'), 'other');
 });
 
+test('detectLaravelLayer frontend', () => {
+  assert.equal(detectLaravelLayer('sonar/ui/app/components/Account.vue'), 'frontend');
+});
+
 test('extractPhpMetadata full', () => {
   const content = '<?php\nnamespace App\\Services;\n\nclass BillingService {}';
   const result = extractPhpMetadata(content, 'app/Services/BillingService.php');

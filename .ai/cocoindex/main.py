@@ -38,6 +38,7 @@ def load_config() -> dict:
 CONFIG = load_config()
 
 LAYER_PATTERNS = [
+    (r'/ui/app/', 'frontend'),
     (r'/Services/', 'service'),
     (r'/Http/Controllers/', 'controller'),
     (r'/Jobs/', 'job'),
@@ -87,6 +88,7 @@ LAYER_CHUNK_PARAMS: dict[str, dict] = {
     'observer':     {'chunk_size': 1500, 'min_chunk_size': 300, 'chunk_overlap': 0},
     'provider':     {'chunk_size': 1500, 'min_chunk_size': 300, 'chunk_overlap': 0},
     'other':        {'chunk_size': 800,  'min_chunk_size': 200, 'chunk_overlap': 200},
+    'frontend':     {'chunk_size': 800,  'min_chunk_size': 200, 'chunk_overlap': 200},
 }
 
 
