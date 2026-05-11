@@ -5,6 +5,10 @@ ARTISAN := php artisan
 SERVICE_ARTISAN := $(SERVICE_EXEC) ${ARTISAN}
 # Script name for tinker-execute-script target
 $SCRIPT ?= null
+COCOINDEX_PG_CONTAINER ?= sonar-cocoindex-postgres-1
+COCOINDEX_PG_USER ?= cocoindex
+COCOINDEX_PG_DB ?= cocoindex
+COCOINDEX_PG_SCHEMA ?= cocoindex
 
 .PHONY: help up down logs elastic-index
 
@@ -95,6 +99,13 @@ NVM_SH := $(NVM_DIR)/nvm.sh
 
 cocoindex-update: ##@ Update cocoindex for dev_tenant inside the web container
 	cd cocoindex && source .venv/bin/activate && cocoindex update main.py && deactivate
+
+cocoindex-dump: ##@ Dump cocoindex DB to ./cocoindex_dump.sql
+	docker exec $(COCOINDEX_PG_CONTAINER) pg_dump -U $(COCOINDEX_PG_USER) $(COCOINDEX_PG_DB) > cocoindex_dump.sql
+
+cocoindex-import-clean: ##@ Drop cocoindex schema then import ./cocoindex_dump.sql
+	docker exec $(COCOINDEX_PG_CONTAINER) psql -U $(COCOINDEX_PG_USER) -d $(COCOINDEX_PG_DB) -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS $(COCOINDEX_PG_SCHEMA) CASCADE;" && \
+	docker exec -i $(COCOINDEX_PG_CONTAINER) psql -U $(COCOINDEX_PG_USER) -d $(COCOINDEX_PG_DB) -v ON_ERROR_STOP=1 < cocoindex_dump.sql
 
 frontend: ##@ Start frontend development server - once built files will remain on host machine
 	cd sonar && \
