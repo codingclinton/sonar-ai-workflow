@@ -1,0 +1,8 @@
+cocoindex[postgres]
+asyncpg
+python-dotenv
+psycopg[binary]
+psycopg-pool
+mcp
+pyyaml
+sentence-transformers
