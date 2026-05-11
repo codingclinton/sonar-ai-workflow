@@ -5,3 +5,4 @@ __pycache__/
 .ai/qdrant/collections/
 .ai/search/venv/
 .env
+IMPLEMENTATION_SUMMARY.md
