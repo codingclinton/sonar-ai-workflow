@@ -1,0 +1,63 @@
+patterns:
+  included:
+    - "*.css"
+    - "*.csv"
+    - "*.html"
+    - "*.js"
+    - "*.json"
+    - "*.md"
+    - "*.php"
+    - "*.py"
+    - "*.scss"
+    - "*.sh"
+    - "*.sql"
+    - "*.ts"
+    - "*.txt"
+    - "*.vue"
+    - "*.xml"
+    - "*.yaml"
+    - "*.yml"
+  excluded:
+    - ".git"
+    - "node_modules"
+    - ".venv"
+    - "venv"
+    - "vendor"
+    - "dist"
+    - "build"
+    - "__pycache__"
+    - "cocoindex"
+    - ".env"
+    - ".DS_Store"
+
+cocoindex:
+  source_dirs:
+    - sonar/app
+    - sonar/tests
+    - sonar/database/upgrade_tasks
+    - sonar/database/migrations
+    - sonar/database/factories
+    - sonar/routes
+
+qdrant:
+  source_dirs:
+    - sonar/app
+    - sonar/ui/app
+  ollama_url: http://localhost:11434
+  ollama_embed_model: nomic-embed-text
+  ollama_generation_model: llama3.2
+  concurrency: 8
+  upsert_batch_size: 50
+  summary_layers:
+    - service
+    - controller
+    - job
+    - request
+    - graphql
+    - console
+    - event
+    - model
+    - listener
+    - notification
+    - observer
+    - provider
