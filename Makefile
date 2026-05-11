@@ -1,4 +1,12 @@
 STACK_CMD := docker compose -f docker-compose.yml -f docker-compose.local-dev.yml
+
+# ANSI colors
+BOLD  := \033[1m
+RESET := \033[0m
+RED   := \033[31m
+GREEN := \033[32m
+YELLOW:= \033[33m
+CYAN  := \033[36m
 APP_SERVICE := web
 SERVICE_EXEC := exec $(APP_SERVICE)
 ARTISAN := php artisan
@@ -10,7 +18,13 @@ COCOINDEX_PG_USER ?= cocoindex
 COCOINDEX_PG_DB ?= cocoindex
 COCOINDEX_PG_SCHEMA ?= cocoindex
 
-.PHONY: help up down logs elastic-index
+.PHONY: help up down log ei cc rs reload-env list-services tinker \
+        cocoindex-index cocoindex-health cocoindex-reset cocoindex-optimize qdrant-index qdrant-reset qdrant-health index-all \
+        frontend seed.demo reset enable \
+        migration.create migration.migrate task-create \
+        pug pug-quiet puf puf-quiet cs-fix ide-helper artisan \
+        enable-daily-billing invoice-delinquent invoice-compliant billing.run autopay.run \
+        activate-account update-vehicle-location add-new-user tinker-test tinker-execute-script
 
 ##@-- Core
 
@@ -97,8 +111,40 @@ NVM_SH := $(NVM_DIR)/nvm.sh
 
 ##@-- Development
 
-cocoindex-update: ##@ Update cocoindex for dev_tenant inside the web container
-	cd cocoindex && source .venv/bin/activate && cocoindex update main.py && deactivate
+index-all: cocoindex-index qdrant-index ##@ Run both cocoindex and qdrant indexers
+
+cocoindex-index: ##@ Update cocoindex for dev_tenant inside the web container
+	@printf "$(BOLD)$(CYAN)◆ CocoIndex — starting incremental update$(RESET)\n"
+	@cd .ai/cocoindex && .venv/bin/cocoindex update main.py
+	@printf "$(BOLD)$(GREEN)✔ CocoIndex update complete$(RESET)\n"
+
+cocoindex-health: ##@ Show CocoIndex health — chunk count, layer distribution, symbol coverage
+	@printf "$(BOLD)$(CYAN)◆ CocoIndex Health Check$(RESET)\n"
+	@python3 .ai/cocoindex/health_check.py
+
+cocoindex-reset: ##@ Fully reset cocoindex — drops postgres schema, removes local state DB, and re-indexes
+	@printf "$(BOLD)$(YELLOW)⚠  CocoIndex Reset$(RESET)\n"
+	@printf "   This will drop the postgres schema and delete .ai/cocoindex/cocoindex_state.\n"
+	@printf "$(BOLD)   Type 'yes' to continue: $(RESET)" && read ans && [ "$${ans}" = "yes" ]
+	@printf "$(CYAN)▸ Dropping CocoIndex schema...$(RESET)\n"
+	@cd .ai/cocoindex && .venv/bin/cocoindex drop main.py
+	@printf "$(CYAN)▸ Removing local state...$(RESET)\n"
+	@rm -rf .ai/cocoindex/cocoindex_state
+	@printf "$(GREEN)✔ Reset complete — starting re-index$(RESET)\n"
+	$(MAKE) cocoindex-index
+	$(MAKE) cocoindex-optimize
+
+cocoindex-optimize: ##@ Upgrade CocoIndex vector index from IVFFlat → HNSW (run after reset)
+	@printf "$(BOLD)$(CYAN)◆ CocoIndex — upgrading vector index to HNSW$(RESET)\n"
+	@docker compose -f docker-compose.yml -f docker-compose.local-dev.yml exec -T cocoindex-postgres \
+		psql -U cocoindex -d cocoindex -c "\
+		DROP INDEX IF EXISTS cocoindex.code_embeddings__vector__embedding; \
+		DROP INDEX IF EXISTS cocoindex.code_embeddings_hnsw_embedding; \
+		CREATE INDEX code_embeddings_hnsw_embedding \
+		ON cocoindex.code_embeddings \
+		USING hnsw (embedding vector_cosine_ops) \
+		WITH (m = 16, ef_construction = 64);"
+	@printf "$(BOLD)$(GREEN)✔ HNSW index ready$(RESET)\n"
 
 cocoindex-dump: ##@ Dump cocoindex DB to ./cocoindex_dump.sql
 	docker exec $(COCOINDEX_PG_CONTAINER) pg_dump -U $(COCOINDEX_PG_USER) $(COCOINDEX_PG_DB) > cocoindex_dump.sql
@@ -106,6 +152,31 @@ cocoindex-dump: ##@ Dump cocoindex DB to ./cocoindex_dump.sql
 cocoindex-import-clean: ##@ Drop cocoindex schema then import ./cocoindex_dump.sql
 	docker exec $(COCOINDEX_PG_CONTAINER) psql -U $(COCOINDEX_PG_USER) -d $(COCOINDEX_PG_DB) -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS $(COCOINDEX_PG_SCHEMA) CASCADE;" && \
 	docker exec -i $(COCOINDEX_PG_CONTAINER) psql -U $(COCOINDEX_PG_USER) -d $(COCOINDEX_PG_DB) -v ON_ERROR_STOP=1 < cocoindex_dump.sql
+
+qdrant-index: ##@ Run qdrant indexer
+	@printf "$(BOLD)$(CYAN)◆ Qdrant — checking Ollama...$(RESET)\n"
+	@curl -sf http://localhost:11434/api/tags > /dev/null || (printf "$(RED)$(BOLD)✘ Ollama not running on localhost:11434. Start it with: ollama serve$(RESET)\n" && exit 1)
+	@printf "$(GREEN)✔ Ollama ready$(RESET)\n"
+	@printf "$(BOLD)$(CYAN)◆ Qdrant — starting indexer$(RESET)\n"
+	@if [ -s "$(NVM_SH)" ]; then \
+		. "$(NVM_SH)" && nvm use; \
+	fi; \
+	node .ai/qdrant/indexer/index.js
+	@printf "$(BOLD)$(GREEN)✔ Qdrant index complete$(RESET)\n"
+
+qdrant-reset: ##@ Fully reset qdrant — deletes the sonar_php_app collection and re-indexes from scratch
+	@printf "$(BOLD)$(YELLOW)⚠  Qdrant Reset$(RESET)\n"
+	@printf "   This will delete the sonar_php_app collection and re-index from scratch.\n"
+	@printf "$(BOLD)   Type 'y' to continue: $(RESET)" && read ans && [ "$${ans}" = "y" ]
+	@printf "$(CYAN)▸ Deleting collection...$(RESET)\n"
+	@curl -sf -X DELETE http://localhost:6333/collections/sonar_php_app \
+		&& printf "$(GREEN)✔ Collection deleted$(RESET)\n" \
+		|| printf "$(YELLOW)⚠  Collection not found, skipping$(RESET)\n"
+	$(MAKE) qdrant-index
+
+qdrant-health: ##@ Show Qdrant collection health — point count, layer distribution, summary coverage
+	@printf "$(BOLD)$(CYAN)◆ Qdrant Health Check$(RESET)\n"
+	@python3 .ai/qdrant/health_check.py
 
 frontend: ##@ Start frontend development server - once built files will remain on host machine
 	cd sonar && \
@@ -123,7 +194,7 @@ seed.demo: ##@ Seed database with test data inside the web container - May fail 
 reset: ##@ Reset the development environment
 	$(STACK_CMD) $(SERVICE_ARTISAN) sonar:dev:reset
 
-enable:
+enable: ##@ Enable dev_tenant instance
 	$(STACK_CMD) $(SERVICE_ARTISAN) sonar:instance:setenabled dev_tenant
 
 migration.create: ##@ Run database migrations inside the web container
