@@ -1,12 +1,8 @@
 {
   "mcpServers": {
-    "cocoindex": {
-      "type": "stdio",
-      "command": "/Users/aclinton-sonar/Dev/sonar/cocoindex/.venv/bin/python",
-      "args": [
-        "/Users/aclinton-sonar/Dev/sonar/cocoindex/mcp_server.py"
-      ],
-      "env": {}
+    "unified_search": {
+      "command": ".ai/venv/bin/python3",
+      "args": [".ai/mcp_server.py"]
     }
   }
 }
