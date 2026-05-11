@@ -1,0 +1,4 @@
+pyyaml
+sentence-transformers
+qdrant-client
+psycopg-pool
