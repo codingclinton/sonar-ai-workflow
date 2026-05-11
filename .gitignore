@@ -1,2 +1,7 @@
 node_modules
 .ai/node_modules
+.DS_Store
+__pycache__/
+.ai/qdrant/collections/
+.ai/search/venv/
+.env
