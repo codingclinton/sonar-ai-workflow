@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "unified_search": {
-      "command": ".ai/venv/bin/python3",
+      "command": ".ai/.venv/bin/python3",
       "args": [".ai/mcp_server.py"]
     }
   }
