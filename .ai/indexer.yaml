@@ -42,7 +42,6 @@ cocoindex:
 qdrant:
   source_dirs:
     - sonar/app
-    - sonar/ui/app
   ollama_url: http://localhost:11434
   ollama_embed_model: nomic-embed-text
   ollama_generation_model: llama3.2
