@@ -10,7 +10,7 @@ import { extractPhpMetadata } from './metadata.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const PROJECT_ROOT = resolve(__dirname, '../../..');
+const PROJECT_ROOT = process.cwd();
 const indexerConfig = loadYaml(await readFile(resolve(__dirname, '../../indexer.yaml'), 'utf8'));
 
 const qdrantConfig = indexerConfig.qdrant;
@@ -29,7 +29,7 @@ const CONFIG = {
   ollamaGenerateModel: qdrantConfig.ollama_generation_model ?? 'llama3.2',
   concurrency: qdrantConfig.concurrency ?? 8,
   upsertBatchSize: qdrantConfig.upsert_batch_size ?? 50,
-  collection: 'sonar_php_app',
+  collection: 'sonar_app',
   vectorSize: 768,
   projectRoot: PROJECT_ROOT,
 };

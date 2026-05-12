@@ -5,7 +5,7 @@ from urllib.request import urlopen
 from urllib.error import URLError
 
 BASE = 'http://localhost:6333'
-COLLECTION = 'sonar_php_app'
+COLLECTION = 'sonar_app'
 BOLD, RESET = '\033[1m', '\033[0m'
 GREEN, RED, YELLOW, CYAN = '\033[32m', '\033[31m', '\033[33m', '\033[36m'
 

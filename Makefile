@@ -164,12 +164,12 @@ qdrant-index: ##@ Run qdrant indexer
 	node .ai/qdrant/indexer/index.js
 	@printf "$(BOLD)$(GREEN)✔ Qdrant index complete$(RESET)\n"
 
-qdrant-reset: ##@ Fully reset qdrant — deletes the sonar_php_app collection and re-indexes from scratch
+qdrant-reset: ##@ Fully reset qdrant — deletes the sonar_app collection and re-indexes from scratch
 	@printf "$(BOLD)$(YELLOW)⚠  Qdrant Reset$(RESET)\n"
-	@printf "   This will delete the sonar_php_app collection and re-index from scratch.\n"
+	@printf "   This will delete the sonar_app collection and re-index from scratch.\n"
 	@printf "$(BOLD)   Type 'y' to continue: $(RESET)" && read ans && [ "$${ans}" = "y" ]
 	@printf "$(CYAN)▸ Deleting collection...$(RESET)\n"
-	@curl -sf -X DELETE http://localhost:6333/collections/sonar_php_app \
+	@curl -sf -X DELETE http://localhost:6333/collections/sonar_app \
 		&& printf "$(GREEN)✔ Collection deleted$(RESET)\n" \
 		|| printf "$(YELLOW)⚠  Collection not found, skipping$(RESET)\n"
 	$(MAKE) qdrant-index

@@ -13,7 +13,7 @@ const CONFIG = {
   qdrantUrl: 'http://localhost:6333',
   ollamaUrl: qdrantConfig.ollama_url ?? 'http://localhost:11434',
   ollamaModel: qdrantConfig.ollama_embed_model ?? 'nomic-embed-text',
-  collection: 'sonar_php_app',
+  collection: 'sonar_app',
   topK: 10,
 };
 
