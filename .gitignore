@@ -7,3 +7,4 @@ __pycache__/
 IMPLEMENTATION_SUMMARY.md
 venv
 .venv
+.ai/logs
