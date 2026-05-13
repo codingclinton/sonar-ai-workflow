@@ -1,37 +1,30 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { createHash } from 'crypto';
 import { readFile } from 'fs/promises';
-import { resolve, relative, dirname } from 'path';
+import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import glob from 'fast-glob';
 import axios from 'axios';
 import { load as loadYaml } from 'js-yaml';
-import { extractPhpMetadata } from './metadata.js';
+import pg from 'pg';
+
+const { Pool } = pg;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const PROJECT_ROOT = process.cwd();
 const indexerConfig = loadYaml(await readFile(resolve(__dirname, '../../indexer.yaml'), 'utf8'));
-
 const qdrantConfig = indexerConfig.qdrant;
-const patterns = indexerConfig.patterns;
-
-const SOURCE_GLOBS = qdrantConfig.source_dirs.flatMap(dir =>
-  patterns.included.map(ext => `${dir}/**/${ext}`)
-);
-const SOURCE_IGNORE = patterns.excluded;
 const SUMMARY_LAYERS = new Set(qdrantConfig.summary_layers);
 
 const CONFIG = {
   qdrantUrl: 'http://localhost:6333',
   ollamaUrl: qdrantConfig.ollama_url ?? 'http://localhost:11434',
-  ollamaEmbedModel: 'nomic-embed-text',
+  ollamaEmbedModel: qdrantConfig.ollama_embed_model ?? 'nomic-embed-text',
   ollamaGenerateModel: qdrantConfig.ollama_generation_model ?? 'llama3.2',
   concurrency: qdrantConfig.concurrency ?? 8,
   upsertBatchSize: qdrantConfig.upsert_batch_size ?? 50,
   collection: 'sonar_app',
   vectorSize: 768,
-  projectRoot: PROJECT_ROOT,
+  pgUrl: process.env.COCOINDEX_DATABASE_URL ?? 'postgresql://cocoindex:cocoindex@localhost:5433/cocoindex',
 };
 
 const qdrant = new QdrantClient({ url: CONFIG.qdrantUrl });
@@ -54,13 +47,17 @@ class Semaphore {
   }
 }
 
-function pathToId(filePath) {
-  const hash = createHash('sha256').update(filePath).digest('hex');
+function chunkToId(filename, startLine, endLine) {
+  const key = `${filename}#L${startLine}-L${endLine}`;
+  const hash = createHash('sha256').update(key).digest('hex');
   return parseInt(hash.slice(0, 12), 16) % Number.MAX_SAFE_INTEGER;
 }
 
-function contentHash(content) {
-  return createHash('sha256').update(content).digest('hex').slice(0, 16);
+function chunkHash(filename, startLine, endLine) {
+  return createHash('sha256')
+    .update(`${filename}:${startLine}:${endLine}`)
+    .digest('hex')
+    .slice(0, 16);
 }
 
 async function ensureCollection() {
@@ -78,12 +75,14 @@ async function loadExistingPoints() {
   let offset = null;
   do {
     const result = await qdrant.scroll(CONFIG.collection, {
-      with_payload: ['path', 'hash'],
+      with_payload: ['chunk_id', 'hash'],
       limit: 1000,
       offset,
     });
     for (const point of result.points) {
-      map.set(point.payload.path, { id: point.id, hash: point.payload.hash });
+      if (point.payload.chunk_id) {
+        map.set(point.payload.chunk_id, { id: point.id, hash: point.payload.hash });
+      }
     }
     offset = result.next_page_offset ?? null;
   } while (offset != null);
@@ -98,9 +97,9 @@ async function embed(text) {
   return data.embedding;
 }
 
-async function generateArchitecturalSummary(content, layerType, className) {
-  const preview = content.slice(0, 3000);
-  const name = className ?? 'this file';
+async function generateArchitecturalSummary(code, layerType, className) {
+  const preview = code.slice(0, 3000);
+  const name = className ?? 'this chunk';
   const prompt = `Write a 1-2 sentence architectural summary of the Laravel ${layerType} "${name}". Describe its responsibilities and what it handles in plain English. Output only the summary sentence(s), nothing else.\n\n${preview}`;
   const { data } = await axios.post(`${CONFIG.ollamaUrl}/api/generate`, {
     model: CONFIG.ollamaGenerateModel,
@@ -110,13 +109,30 @@ async function generateArchitecturalSummary(content, layerType, className) {
   return data.response.trim();
 }
 
+async function fetchChunksFromPostgres() {
+  const pool = new Pool({ connectionString: CONFIG.pgUrl });
+  try {
+    const { rows } = await pool.query(
+      `SELECT filename, start_line, end_line, code, class_name, namespace, layer_type, chunk_kind
+       FROM "cocoindex"."code_embeddings"
+       ORDER BY filename, start_line`
+    );
+    return rows;
+  } finally {
+    await pool.end();
+  }
+}
+
 async function main() {
   await ensureCollection();
 
+  console.log('Fetching chunks from CocoIndex Postgres...');
+  const chunks = await fetchChunksFromPostgres();
+  console.log(`Loaded ${chunks.length} chunks from Postgres.`);
+
   const existing = await loadExistingPoints();
-  const files = await glob(SOURCE_GLOBS, { cwd: CONFIG.projectRoot, absolute: true, ignore: SOURCE_IGNORE });
-  const currentPaths = new Set();
-  const total = files.length;
+  const currentChunkIds = new Set();
+  const total = chunks.length;
 
   let processed = 0, indexed = 0, skipped = 0, deleted = 0;
   const startTime = Date.now();
@@ -136,7 +152,7 @@ async function main() {
     const filled = Math.floor(pct / 2);
     const bar = '█'.repeat(filled) + '░'.repeat(50 - filled);
     const elapsed = (Date.now() - startTime) / 1000;
-    const rate = processed / elapsed;
+    const rate = processed / Math.max(elapsed, 0.001);
     const eta = formatEta((total - processed) / rate);
     process.stdout.write(`\r[${bar}] ${pct}% (${processed}/${total}) indexed=${indexed} skipped=${skipped} eta=${eta}`);
   }
@@ -151,15 +167,14 @@ async function main() {
     }
   }
 
-  await Promise.all(files.map(async absPath => {
+  await Promise.all(chunks.map(async (row) => {
     await sem.acquire();
     try {
-      const relPath = relative(CONFIG.projectRoot, absPath);
-      currentPaths.add(relPath);
+      const chunkId = `${row.filename}#L${row.start_line}-L${row.end_line}`;
+      currentChunkIds.add(chunkId);
 
-      const content = await readFile(absPath, 'utf8');
-      const hash = contentHash(content);
-      const existingEntry = existing.get(relPath);
+      const hash = chunkHash(row.filename, row.start_line, row.end_line);
+      const existingEntry = existing.get(chunkId);
 
       if (existingEntry?.hash === hash) {
         skipped++;
@@ -168,52 +183,44 @@ async function main() {
         return;
       }
 
-      const isPhp = relPath.endsWith('.php');
-      const { className, namespace, layerType } = isPhp
-        ? extractPhpMetadata(content, relPath)
-        : { className: null, namespace: null, layerType: relPath.includes('/ui/app/') ? 'frontend' : 'other' };
-
-      const needsSummary = isPhp && SUMMARY_LAYERS.has(layerType);
-
-      let summary;
-      if (needsSummary) {
-        try {
-          summary = await generateArchitecturalSummary(content, layerType, className);
-        } catch (err) {
-          process.stdout.write(`\n  SKIP (summary error) ${relPath}: ${err.response?.data?.error ?? err.message}\n`);
-          processed++;
-          renderProgress();
-          return;
-        }
-      } else {
-        summary = content.slice(0, 500);
-      }
+      const summary = row.code.slice(0, 500);
 
       let vector;
       try {
         vector = await embed(summary);
       } catch (err) {
-        process.stdout.write(`\n  SKIP (embed error) ${relPath}: ${err.response?.data?.error ?? err.message}\n`);
+        process.stdout.write(`\n  SKIP (embed error) ${chunkId}: ${err.response?.data?.error ?? err.message}\n`);
         processed++;
         renderProgress();
         return;
       }
       if (!vector || vector.length !== CONFIG.vectorSize) {
-        process.stdout.write(`\n  SKIP (bad vector) ${relPath}: length=${vector?.length ?? 0} expected=${CONFIG.vectorSize}\n`);
+        process.stdout.write(`\n  SKIP (bad vector) ${chunkId}: length=${vector?.length ?? 0} expected=${CONFIG.vectorSize}\n`);
         processed++;
         renderProgress();
         return;
       }
 
       pointBuffer.push({
-        id: pathToId(relPath),
+        id: chunkToId(row.filename, row.start_line, row.end_line),
         vector,
-        payload: { path: relPath, hash, summary, class_name: className, namespace, layer_type: layerType },
+        payload: {
+          chunk_id:   chunkId,
+          path:       row.filename,
+          start_line: row.start_line,
+          end_line:   row.end_line,
+          summary,
+          class_name: row.class_name ?? null,
+          namespace:  row.namespace ?? null,
+          layer_type: row.layer_type ?? null,
+          chunk_kind: row.chunk_kind ?? null,
+          hash,
+        },
       });
       try {
         await flushBuffer();
       } catch (err) {
-        process.stdout.write(`\n  SKIP (upsert error) ${relPath}: ${err.message}\n`);
+        process.stdout.write(`\n  SKIP (upsert error) ${chunkId}: ${err.message}\n`);
         processed++;
         renderProgress();
         return;
@@ -235,9 +242,10 @@ async function main() {
     throw err;
   }
 
+  // Delete Qdrant points for chunks no longer in Postgres
   const toDelete = [];
-  for (const [path, entry] of existing) {
-    if (!currentPaths.has(path)) toDelete.push(entry.id);
+  for (const [chunkId, entry] of existing) {
+    if (!currentChunkIds.has(chunkId)) toDelete.push(entry.id);
   }
   if (toDelete.length > 0) {
     try {

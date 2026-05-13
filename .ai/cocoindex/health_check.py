@@ -56,6 +56,31 @@ for row in layer_rows:
     layer = row[0] if row[0] else 'null'
     print(f'    {layer:<16} {row[1]}')
 
+# chunk_kind distribution — null expected for non-PHP files and mid-method continuation chunks
+print(f'\n  Chunk kind distribution:')
+kind_rows = query("""
+    SELECT COALESCE(chunk_kind, 'null') AS kind, COUNT(*) AS cnt,
+           ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) AS pct
+    FROM cocoindex.code_embeddings
+    GROUP BY chunk_kind
+    ORDER BY cnt DESC
+""")
+for row in kind_rows:
+    kind, cnt, pct = row
+    print(f'    {kind:<16} {cnt:>6}  ({pct}%)')
+
+# Gate: check null rate for small single-class PHP layers where every chunk should have a declaration
+gate_rows = query("""
+    SELECT ROUND(COUNT(CASE WHEN chunk_kind IS NULL THEN 1 END) * 100.0 / COUNT(*), 1)
+    FROM cocoindex.code_embeddings
+    WHERE layer_type IN ('event', 'notification', 'request', 'observer')
+""")
+small_layer_null_pct = float(gate_rows[0][0]) if gate_rows else 0.0
+if small_layer_null_pct < 15:
+    print(f'    {GREEN}✔ Small-layer NULL rate {small_layer_null_pct}% — extractor working{RESET}')
+else:
+    print(f'    {RED}⚠ Small-layer NULL rate {small_layer_null_pct}% — chunk_kind extractor may be broken{RESET}')
+
 # Sample symbols
 print(f'\n  {BOLD}Sample symbols:{RESET}')
 symbol_rows = query("""

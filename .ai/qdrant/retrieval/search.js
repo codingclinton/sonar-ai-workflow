@@ -63,12 +63,16 @@ async function main() {
   const results = await qdrant.search(CONFIG.collection, searchParams);
 
   const output = results.map(({ payload, score }) => ({
-    filename: payload.path,
-    score: parseFloat(score.toFixed(4)),
-    snippet: payload.summary ?? '',
+    chunk_id:   payload.chunk_id ?? null,
+    filename:   payload.path,
+    location:   payload.start_line != null ? `L${payload.start_line}-L${payload.end_line}` : null,
+    start_line: payload.start_line ?? null,
+    end_line:   payload.end_line ?? null,
+    score:      parseFloat(score.toFixed(4)),
+    snippet:    payload.summary ?? '',
     class_name: payload.class_name ?? null,
     layer_type: payload.layer_type ?? null,
-    source: 'qdrant',
+    source:     'qdrant',
   }));
 
   console.log(JSON.stringify(output));

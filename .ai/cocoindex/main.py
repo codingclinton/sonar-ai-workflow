@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -63,13 +64,23 @@ def detect_laravel_layer(filepath: str) -> str:
     return 'other'
 
 
+# File-scope use statements: matches `use Foo\Bar;` and `use Foo\Bar as Alias;`
+_USE_STMT_RE = re.compile(
+    r'^use\s+([\w\\]+)(?:\s+as\s+\w+)?\s*;',
+    re.MULTILINE,
+)
+
+
 def extract_php_metadata(text: str, filepath: str) -> dict:
     ns_match = re.search(r'^namespace\s+([\w\\]+);', text, re.MULTILINE)
     class_match = re.search(r'\bclass\s+(\w+)', text)
+    use_targets = [m.group(1) for m in _USE_STMT_RE.finditer(text)]
     return {
         'namespace': ns_match.group(1) if ns_match else None,
         'class_name': class_match.group(1) if class_match else None,
         'layer_type': detect_laravel_layer(filepath),
+        # JSON-serialized list of file-scope imports; same value for every chunk in the file
+        'uses': json.dumps(use_targets) if use_targets else None,
     }
 
 
@@ -94,6 +105,47 @@ LAYER_CHUNK_PARAMS: dict[str, dict] = {
 
 def get_chunk_params(layer_type: str) -> dict:
     return LAYER_CHUNK_PARAMS.get(layer_type, LAYER_CHUNK_PARAMS['other'])
+
+
+# chunk_kind: detect the primary PHP declaration type in a chunk.
+# No tree-sitter available; using anchored line-start patterns rather than substring matching.
+# Order matters: check class/trait/interface before method/function to avoid mislabelling
+# a class body that also contains method declarations.
+_CHUNK_KIND_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'^\s*(?:abstract\s+|final\s+)?class\s+\w+', re.MULTILINE), 'class'),
+    (re.compile(r'^\s*trait\s+\w+', re.MULTILINE), 'trait'),
+    (re.compile(r'^\s*interface\s+\w+', re.MULTILINE), 'interface'),
+    (re.compile(
+        r'^\s*(?:public|protected|private)(?:\s+static)?\s+function\s+\w+',
+        re.MULTILINE,
+    ), 'method'),
+    (re.compile(r'^\s*function\s+\w+', re.MULTILINE), 'function'),
+]
+
+
+def extract_chunk_kind(text: str) -> str | None:
+    for pattern, kind in _CHUNK_KIND_PATTERNS:
+        if pattern.search(text):
+            return kind
+    return None
+
+
+# PHPDoc summary: first non-empty prose line from a /** ... */ block, stripped of * prefixes.
+_PHPDOC_BLOCK_RE = re.compile(r'/\*\*(.+?)\*/', re.DOTALL)
+_PHPDOC_LINE_RE = re.compile(r'^\s*\*?\s*(.*)', re.MULTILINE)
+_PHPDOC_TAG_RE = re.compile(r'^@\w+')
+
+
+def extract_doc_summary(text: str) -> str | None:
+    block_m = _PHPDOC_BLOCK_RE.search(text)
+    if not block_m:
+        return None
+    body = block_m.group(1)
+    for line_m in _PHPDOC_LINE_RE.finditer(body):
+        line = line_m.group(1).strip()
+        if line and not _PHPDOC_TAG_RE.match(line):
+            return line[:200]
+    return None
 
 
 _METHOD_NAME_RE = re.compile(
@@ -125,6 +177,9 @@ class CodeEmbedding:
     class_name: str | None = None
     namespace: str | None = None
     symbol: str | None = None
+    chunk_kind: str | None = None
+    doc_summary: str | None = None
+    uses: str | None = None  # JSON string of file-scope use imports (same for all chunks in file)
 
 
 @coco.lifespan
@@ -158,6 +213,9 @@ async def process_chunk(
             class_name=metadata.get('class_name'),
             namespace=metadata.get('namespace'),
             symbol=symbol,
+            chunk_kind=extract_chunk_kind(chunk.text),
+            doc_summary=extract_doc_summary(chunk.text),
+            uses=metadata.get('uses'),
         )
     )
 
@@ -214,15 +272,19 @@ async def app_main(sourcedirs: list[pathlib.Path]) -> None:
             # Prefix key with sourcedir name to make globally unique
             unique_key = f"{sourcedir.name}/{key}"
             all_files.append((unique_key, item))
-    
+
     await coco.mount_each(process_file, all_files, target_table)
 
+
+_source_root_env = os.getenv("COCOINDEX_SOURCE_ROOT")
+_SOURCE_ROOT = (
+    pathlib.Path(_source_root_env).resolve()
+    if _source_root_env
+    else pathlib.Path(__file__).parent.parent.parent.resolve()
+)
 
 app = coco.App(
     coco.AppConfig(name="CodeEmbedding"),
     app_main,
-    sourcedirs=[
-        pathlib.Path(__file__).parent.parent.parent.resolve() / d
-        for d in CONFIG["cocoindex"]["source_dirs"]
-    ],
+    sourcedirs=[_SOURCE_ROOT / d for d in CONFIG["cocoindex"]["source_dirs"]],
 )
