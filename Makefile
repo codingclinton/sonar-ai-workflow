@@ -111,7 +111,11 @@ NVM_SH := $(NVM_DIR)/nvm.sh
 
 ##@-- Development
 
+.NOTPARALLEL: index-all
 index-all: cocoindex-index qdrant-index ##@ Run both cocoindex and qdrant indexers
+
+search-report: ##@ Show search call log report (--days=N to filter, --json for machine output)
+	@python3 .ai/search/analyze_logs.py $(if $(days),--days $(days),) $(if $(json),--json,)
 
 cocoindex-index: ##@ Update cocoindex for dev_tenant inside the web container
 	@printf "$(BOLD)$(CYAN)◆ CocoIndex — starting incremental update$(RESET)\n"
